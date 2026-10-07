@@ -1,0 +1,10 @@
+datasets
+pandas
+numpy
+scipy
+scikit-learn
+matplotlib
+sympy
+antlr4-python3-runtime==4.11
+wandb
+pytest

@@ -1,0 +1,25 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Secrets (never commit tokens)
+.env
+
+# Data and model files (stored on Hugging Face Hub instead)
+data/
+checkpoints/
+*.safetensors
+*.bin
+
+# Experiment logs
+wandb/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
