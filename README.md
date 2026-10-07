@@ -1,7 +1,5 @@
 # Self-Improving Language Model Efficiency
 
-CSUN machine learning course project (Phase 1: Sep – Dec 2026).
-
 We train **Qwen2.5-1.5B** with **GRPO** (a reinforcement-learning method) and test whether choosing practice problems by difficulty lets the model improve itself using **fewer GPU-hours**, without losing accuracy.
 
 - **Datasets:** [Orca-Math](https://huggingface.co/datasets/microsoft/orca-math-word-problems-200k) (math word problems) and [calculus-dataset](https://huggingface.co/datasets/di-zhang-fdu/calculus-dataset) (symbolic calculus)
