@@ -1,7 +1,5 @@
 # Self-Improving Language Model Efficiency
 
-CSUN machine learning course project (Phase 1: Sep – Dec 2026).
-
 We train **Qwen2.5-1.5B** with **GRPO** (a reinforcement-learning method) and test whether choosing practice problems by difficulty lets the model improve itself using **fewer GPU-hours**, without losing accuracy.
 
 - **Datasets:** [Orca-Math](https://huggingface.co/datasets/microsoft/orca-math-word-problems-200k) (math word problems) and [calculus-dataset](https://huggingface.co/datasets/di-zhang-fdu/calculus-dataset) (symbolic calculus)
@@ -78,7 +76,16 @@ your task branch  →  dev  →  main
 
 - **`main`**: tested, working version. Our safe backup. Only updated from `dev` at milestones.
 - **`dev`**: where everyone's finished work is combined. If something clashes, it happens here, not on `main`.
-- **Task branches**: one per task, e.g. `data/splits`, `training/grpo-baseline`.
+- **Task branches**: one per task, named `type/short-description` using the commit types below, e.g. `feat/sympy-checker`, `chore/kaggle-setup`, `docs/progress-report`.
+
+**Starting a task:** always branch from the latest `dev`.
+
+```
+git checkout dev
+git pull origin dev
+git checkout -b feat/sympy-checker
+git push -u origin feat/sympy-checker
+```
 
 **Daily workflow:**
 
@@ -88,7 +95,7 @@ git pull origin dev                 # get teammates' latest work
 # ...do your work...
 git status                          # .venv must NOT appear
 git add <files>
-git commit -m "Describe what changed"
+git commit -m "feat(data): describe what changed"
 git push
 ```
 
@@ -96,28 +103,15 @@ Then on GitHub, open a **pull request into `dev`** and request a review from eve
 
 ---
 
-## Team roles
+## How we split work
 
-| Role | Owner | Responsible for | Branches |
-|---|---|---|---|
-| Data | _name_ | Loading and filtering datasets, answer checkers, train/validation/test splits | `data/...` |
-| Training | _name_ | GRPO training loop, the four selection strategies, Kaggle/Colab runs | `training/...` |
-| Evaluation | _name_ | W&B logging, base-model check, statistics, plots, report | `eval/...` |
-
-Everyone reviews everyone else's pull requests. Create a branch only when you start a task:
-
-```
-git checkout dev
-git pull origin dev
-git checkout -b data/orca-math-prep   # role/short-task-name
-git push -u origin data/orca-math-prep
-```
+All three of us work on the same stage each week, splitting its tasks three ways, so everyone works on data, training and analysis. Weekly tasks, branches and "done when" checks are in the team planner. We meet every Thursday to review progress and assign the next week's tasks.
 
 ---
 
 ## Commit messages
 
-Please follow [Conventional Commits](https://www.conventionalcommits.org):
+We follow [Conventional Commits](https://www.conventionalcommits.org):
 
 ---
 
@@ -136,5 +130,6 @@ Please follow [Conventional Commits](https://www.conventionalcommits.org):
 
 ## More Help
 
+- Ask in the group chat before changing anything shared.
 - Start here for GRPO: the *DeepSeekMath* paper (arXiv:2402.03300), GRPO section.
 - Training library docs: https://github.com/huggingface/trl
