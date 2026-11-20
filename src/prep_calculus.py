@@ -1,4 +1,3 @@
-
 """Clean the calculus dataset into the team's shared format.
 
 Output columns:
@@ -8,446 +7,121 @@ Run from repository root:
     python -m src.prep_calculus
 
 Saves:
-    data/calculus_clean.parquet
-    data/calculus_cleaning_report.txt
+    data/calculus_clean.parquet  (not committed to Git)
 """
-
-from pathlib import Path
+import os
 import re
 
 import pandas as pd
+from datasets import load_dataset
+from sympy import count_ops
 from sympy.parsing.latex import parse_latex
 
+TEMPLATES = {
+    "Derivatives": "Find the derivative of ${expr}$ with respect to x.",
+    "Limits": "Evaluate the limit: ${expr}$",
+    "Integrals": "Find the indefinite integral of ${expr}$ with respect to x.",
+}
 
-INPUT_PATH = Path("data/calculus_raw.csv")
-OUTPUT_PATH = Path("data/calculus_clean.parquet")
-REPORT_PATH = Path("data/calculus_cleaning_report.txt")
+# Placeholder until "Required change 3" is posted by the reviewer.
+TOPICS_TO_KEEP = ["Derivatives", "Limits", "Integrals"]
 
-TOPICS = [
-    "Derivatives",
-    "Integrals",
-    "Limits",
-    "Differential Equations",
-]
+_previous_rows = {"n": None}
 
 
-def report(step, before, after, reason=""):
-    removed = before - after
-
-    message = (
-        f"{step:<40} {after:>8,} rows "
-        f"({-removed:+,})"
-    )
-
+def report(step, df, reason=""):
+    """Print the row count after a step and how many rows it removed."""
+    after = len(df)
+    before = _previous_rows["n"] if _previous_rows["n"] is not None else after
+    message = f"{step:<40} {after:>8,} rows ({after - before:+,})"
     if reason:
         message += f" | {reason}"
-
     print(message)
+    _previous_rows["n"] = after
 
 
-def assign_level(topic, question):
-    """Assign provisional topic-based difficulty labels."""
-
-    levels = {
-        "Derivatives": 1,
-        "Integrals": 2,
-        "Limits": 3,
-        "Differential Equations": 4,
-    }
-
-    return levels.get(topic, 5)
+def build_question(topic: str, expression: str) -> str:
+    """Turn a topic + LaTeX expression into a full question the model can answer."""
+    if topic not in TEMPLATES:
+        raise ValueError(f"Unknown topic: {topic}")
+    return TEMPLATES[topic].format(expr=expression)
 
 
-def classify_answer(answer):
-    """Classify reference answers by mathematical format."""
-
-    answer = str(answer).strip()
-
-    if not answer:
-        return "Empty"
-
-    if r"\langle" in answer:
-        return "Interval"
-
-    if "f{(x )}" in answer:
-        return "Differential equation"
-
-    if r"\infty" in answer:
-        return "Infinity"
-
-    if re.fullmatch(r"[-+]?\d+(\.\d+)?", answer):
-        return "Number"
-
-    if r"\frac" in answer:
-        return "Fraction"
-
-    return "Symbolic expression"
+def is_parseable(latex: str) -> bool:
+    """True if SymPy's parse_latex can read this LaTeX without an error."""
+    try:
+        parse_latex(latex)
+        return True
+    except Exception:
+        return False
 
 
-def test_latex_parsing(df):
-    """Inspect LaTeX parsing without deleting failed answers."""
+def limit_body(q: str) -> str:
+    """For limit problems, return the expression inside \\lim {x \\to a } {...}.
 
+    Other expressions are returned unchanged.
+    """
+    m = re.match(r"\s*\\lim\s*\{[^}]*\}\s*\{(.*)\}\s*$", q, flags=re.DOTALL)
+    return m.group(1) if m else q
+
+
+def expression_size(latex: str) -> int:
+    """Number of operations in the expression, using SymPy's count_ops()."""
+    return int(count_ops(parse_latex(latex)))
+
+
+def inspect_latex_parsing(df):
+    """Inspect LaTeX parsing without deleting failed answers (not called by main)."""
     results = []
-
     for _, row in df.iterrows():
-        answer = str(row["a"])
-
-        try:
-            parse_latex(answer)
-            success = True
-            error = ""
-
-        except Exception as e:
-            success = False
-            error = str(e)
-
-        results.append({
-            "topic": row["type"],
-            "answer": answer,
-            "success": success,
-            "error": error,
-        })
-
+        ok = is_parseable(str(row["a"]))
+        results.append({"topic": row["type"], "success": ok})
     results_df = pd.DataFrame(results)
-
-    print("\n" + "=" * 60)
-    print("LATEX PARSING RESULTS")
-    print("=" * 60)
-
-    summary = results_df.groupby("topic")["success"].agg(
-        total="count",
-        successful="sum",
-        failed=lambda x: (~x).sum(),
-    )
-
-    print(summary)
-
-    print("\nOverall parsing results:")
-    print("Total:", len(results_df))
-    print("Successful:", results_df["success"].sum())
-    print("Failed:", (~results_df["success"]).sum())
-
-    failures = results_df[~results_df["success"]]
-
-    print("\nSample parsing failures:")
-
-    if failures.empty:
-        print("No parsing failures.")
-
-    else:
-        print(
-            failures[
-                ["topic", "answer", "error"]
-            ].head(30).to_string(index=False)
-        )
-
-    print("\nNo answers removed because of parser failures.")
-
+    print(results_df.groupby("topic")["success"].agg(total="count", successful="sum"))
     return results_df
 
 
-def inspect_interval_answers(df):
-    """Validate interval answer notation."""
-
-    intervals = df[
-        df["a"].astype(str).str.contains(
-            r"\\langle",
-            regex=True
-        )
-    ].copy()
-
-    valid_pattern = (
-        r"\\langle\s*"
-        r"(-?\d+|-?\\infty)\s*,\s*"
-        r"(-?\d+|\\infty)\s*"
-        r"\\rangle"
-    )
-
-    intervals["valid_format"] = (
-        intervals["a"]
-        .astype(str)
-        .str.fullmatch(valid_pattern)
-    )
-
-    print("\n" + "=" * 60)
-    print("INTERVAL ANSWER INSPECTION")
-    print("=" * 60)
-
-    print("Total interval answers:", len(intervals))
-    print("\nFormat results:")
-    print(intervals["valid_format"].value_counts(dropna=False))
-
-    print("\nIntervals by topic:")
-    print(intervals["type"].value_counts())
-
-    invalid = intervals[~intervals["valid_format"]]
-
-    if invalid.empty:
-        print("\nNo invalid interval formats found.")
-
-    else:
-        print("\nInvalid interval examples:")
-        print(
-            invalid[["type", "a"]]
-            .head(30)
-            .to_string(index=False)
-        )
-
-    print("\nNo interval answers removed.")
-
-
-def inspect_cross_topic_conflicts(df):
-    """Find identical questions with different answers across topics."""
-
-    conflicts = (
-        df.groupby("q")
-        .agg(
-            topic_count=("type", "nunique"),
-            answer_count=("a", "nunique"),
-            topics=("type", lambda x: list(x.unique())),
-            answers=("a", lambda x: list(x.unique())),
-        )
-        .query("topic_count > 1 and answer_count > 1")
-    )
-
-    print("\n" + "=" * 60)
-    print("CROSS-TOPIC CONFLICT INSPECTION")
-    print("=" * 60)
-
-    print("Conflicting questions:", len(conflicts))
-
-    if not conflicts.empty:
-        print("\nSample conflicts:")
-        print(conflicts.head(30).to_string())
-
-    return conflicts
-
-
 def main():
+    df = load_dataset("di-zhang-fdu/calculus-dataset", split="train").to_pandas()
+    df["source_index"] = df.index
+    report("Loaded", df)
 
-    cleaning_log = []
+    df = df[df["q"].notna() & df["a"].notna()]
+    df = df[(df["q"].str.strip() != "") & (df["a"].str.strip() != "")]
+    report("Drop missing/empty", df)
 
-    # 1. Load dataset
-    df = pd.read_csv(INPUT_PATH)
+    df = df[df["type"].isin(TOPICS_TO_KEEP)]
+    report("Keep chosen topics", df)
 
-    print(f"Loaded calculus dataset: {len(df):,} rows")
+    df = df[~df["a"].str.contains(r"\langle", regex=False)]
+    report("Drop interval answers", df)
 
-    cleaning_log.append(f"Original rows: {len(df)}")
+    df = df.drop_duplicates(subset=["type", "q"])
+    report("Drop duplicates", df)
 
-    # 2. Validate required columns
-    required_columns = ["type", "q", "a"]
+    df = df[df["a"].map(is_parseable)]
+    report("Drop unparseable answers", df)
 
-    missing_columns = [
-        col for col in required_columns
-        if col not in df.columns
-    ]
+    df = df.copy()
+    df["body"] = df["q"].map(limit_body)
+    df = df[df["body"].map(is_parseable)]
+    report("Drop unparseable expressions", df)
 
-    if missing_columns:
-        raise ValueError(
-            f"Missing required columns: {missing_columns}"
-        )
+    df = df.copy()
+    df["size"] = df["body"].map(expression_size)
+    df["level"] = pd.qcut(
+        df["size"].rank(method="first"), 3, labels=[1, 2, 3]
+    ).astype(int)
+    print("\nRows per topic and level:")
+    print(df.groupby(["type", "level"]).size())
 
-    # 3. Drop missing values
-    before = len(df)
+    df["question"] = [build_question(t, q) for t, q in zip(df["type"], df["q"])]
+    df["id"] = "calculus_" + df["source_index"].astype(str).str.zfill(6)
+    df = df.rename(columns={"a": "answer"})[["id", "question", "answer", "level"]]
 
-    df = df.dropna(subset=required_columns).copy()
-
-    report(
-        "Drop: missing values",
-        before,
-        len(df),
-        "Missing required fields"
-    )
-
-    cleaning_log.append(
-        f"Missing values removed: {before - len(df)}"
-    )
-
-    # 4. Remove empty questions and answers
-    before = len(df)
-
-    df = df[
-        df["q"].astype(str).str.strip().ne("")
-        & df["a"].astype(str).str.strip().ne("")
-    ].copy()
-
-    report(
-        "Drop: empty questions/answers",
-        before,
-        len(df),
-        "Empty question or answer"
-    )
-
-    cleaning_log.append(
-        f"Empty questions/answers removed: {before - len(df)}"
-    )
-
-    # 5. Validate topic names
-    before = len(df)
-
-    df = df[df["type"].isin(TOPICS)].copy()
-
-    report(
-        "Drop: invalid topics",
-        before,
-        len(df),
-        "Topics outside approved list"
-    )
-
-    cleaning_log.append(
-        f"Invalid topics removed: {before - len(df)}"
-    )
-
-    # 6. Inspect reference answers
-    print("\n" + "=" * 60)
-    print("REFERENCE ANSWER INSPECTION")
-    print("=" * 60)
-
-    sample_size = min(30, len(df))
-
-    for i, answer in enumerate(
-        df["a"].sample(
-            n=sample_size,
-            random_state=42
-        ),
-        start=1
-    ):
-        print(f"{i}. {answer}")
-
-    # 7. Classify answer formats
-    print("\n" + "=" * 60)
-    print("ANSWER FORMAT DISTRIBUTION")
-    print("=" * 60)
-
-    answer_types = df["a"].apply(classify_answer)
-
-    print(answer_types.value_counts())
-
-    # 8. Inspect LaTeX parsing
-    parsing_results = test_latex_parsing(df)
-
-    # 9. Inspect interval answers
-    inspect_interval_answers(df)
-
-    # 10. Remove duplicate question-topic pairs
-    before = len(df)
-
-    df = df.drop_duplicates(
-        subset=["type", "q"],
-        keep="first",
-    ).copy()
-
-    report(
-        "Drop: duplicate question-topic pairs",
-        before,
-        len(df),
-        "Same question and topic"
-    )
-
-    cleaning_log.append(
-        f"Duplicate question-topic pairs removed: {before - len(df)}"
-    )
-
-    # 11. Inspect cross-topic conflicts
-    conflicts = inspect_cross_topic_conflicts(df)
-
-    cleaning_log.append(
-        f"Cross-topic conflicting questions found: {len(conflicts)}"
-    )
-
-    # 12. Preserve conflicts for manual review
-    print("\n" + "=" * 60)
-    print("CROSS-TOPIC CONFLICT HANDLING")
-    print("=" * 60)
-
-    print(
-        "Conflicting questions are being preserved "
-        "for manual review."
-    )
-
-    print(
-        "No questions removed automatically because "
-        "of cross-topic conflicts."
-    )
-
-    cleaning_log.append(
-        "Cross-topic conflicts preserved for manual review."
-    )
-
-    # 13. Assign difficulty levels
-    df["level"] = [
-        assign_level(topic, question)
-        for topic, question in zip(df["type"], df["q"])
-    ]
-
-    print("\nDifficulty distribution:")
-    print(df["level"].value_counts().sort_index())
-
-    # 14. Generate unique IDs
-    df = df.reset_index(drop=True)
-
-    df["id"] = [
-        f"calculus_{i:06d}"
-        for i in range(1, len(df) + 1)
-    ]
-
-    # 15. Rename shared columns
-    df = df.rename(
-        columns={
-            "q": "question",
-            "a": "answer",
-        }
-    )
-
-    df = df[
-        ["id", "question", "answer", "level"]
-    ]
-
-    # 16. Validate final output
-    assert df["id"].is_unique
-
-    assert not df.duplicated(
-        subset=["question", "level"]
-    ).any()
-
-    assert df.columns.tolist() == [
-        "id", "question", "answer", "level"
-    ]
-
-    # 17. Save final dataset
-    OUTPUT_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    df.to_parquet(
-        OUTPUT_PATH,
-        index=False,
-    )
-
-    # 18. Generate cleaning report
-    cleaning_log.extend([
-        f"Final rows: {len(df)}",
-        f"Final columns: {df.columns.tolist()}",
-        f"SymPy parsing successes: {parsing_results['success'].sum()}",
-        f"SymPy parsing failures: {(~parsing_results['success']).sum()}",
-        "Interval parser failures are not automatically removed.",
-        "Difficulty labels are provisional topic-based labels.",
-    ])
-
-    REPORT_PATH.write_text(
-        "\n".join(cleaning_log),
-        encoding="utf-8"
-    )
-
-    print("\n" + "=" * 60)
-    print("FINAL DATASET")
-    print("=" * 60)
-
-    print("Final dataset shape:", df.shape)
-    print("Final columns:", df.columns.tolist())
-    print("Saved to:", OUTPUT_PATH)
-    print("Cleaning report saved to:", REPORT_PATH)
+    os.makedirs("data", exist_ok=True)
+    df.to_parquet("data/calculus_clean.parquet", index=False)
+    report("Final", df)
 
 
 if __name__ == "__main__":
