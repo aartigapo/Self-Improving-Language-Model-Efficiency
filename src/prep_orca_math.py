@@ -1,5 +1,8 @@
 """Clean Orca-Math into the team's shared format: id, question, answer, level.
 
+level is 1, 2 or 3: equal-sized thirds by number of calculation steps ('=' signs)
+in the worked solution, 1 being the fewest.
+
 Run from the repo root:
     python -m src.prep_orca_math
 
@@ -27,16 +30,39 @@ UNDETERMINED = re.compile(
 )
 RATIO = re.compile(r"\d\s*:\s*\d")
 TIME_OF_DAY = re.compile(r"\d\s*(a\.?\s*m\.?|p\.?\s*m\.?)(?!\w)|\d:\d\d", re.IGNORECASE)
-MULTIPLE_ANSWERS = re.compile(r"\brespectively\b|" + NUMBER + r"[^.\d]*,\s*\$?" + NUMBER + r"[^.\d]*\band\b", re.IGNORECASE)
-# A one-letter variable next to an operator, e.g. "(n-1) * n / 2": a formula, not a number.
+# "...respectively", a list like "$3789.47, $1263.16, and $947.37", or an alternative like "10% (or 0.1 ...)".
+MULTIPLE_ANSWERS = re.compile(
+    r"\brespectively\b|" + NUMBER + r"[^.\d]*,\s*\$?" + NUMBER + r"[^.\d]*\band\b|\(or\s[^)]*\d",
+    re.IGNORECASE,
+)
+# A one-letter variable next to an operator, e.g. "(n-1) * n / 2", or a root or pi
+# like "200√3": a formula, not a plain number.
 # One letter only, so hyphenated words like "24-hour" or "cross-section" don't match.
-FORMULA = re.compile(r"(?<![a-zA-Z])[a-zA-Z]\s*[-+*/^]\s*[\d(]|[\d)]\s*[-+*/^]\s*[a-zA-Z](?![a-zA-Z])")
+FORMULA = re.compile(
+    r"(?<![a-zA-Z])[a-zA-Z]\s*[-+*/^]\s*[\d(]|[\d)]\s*[-+*/^]\s*[a-zA-Z](?![a-zA-Z])|√|π|\bsqrt\b|\bpi\b",
+    re.IGNORECASE,
+)
+# An answer written as a word, e.g. "throw the ball at least twice ... to 51%".
+NUMBER_WORD = re.compile(r"\b(once|twice|thrice)\b", re.IGNORECASE)
 
 
 def last_line(solution: str) -> str:
     """The final non-empty line of a worked solution, where the answer is stated."""
     lines = [line.strip() for line in solution.strip().splitlines() if line.strip()]
     return lines[-1] if lines else ""
+
+
+def final_sentence(line: str) -> str:
+    """The last sentence of a line that has a number in it.
+
+    A last line can hold several sentences: "...so Jake has 17 - 6 = 11 peaches.
+    However, you asked about the person. So the person has 17 peaches." The answer
+    is in the final one. Splits only before a capital letter, so "$33.17" and
+    "Rs. 108" stay whole.
+    """
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", line)
+    with_numbers = [s for s in sentences if re.search(r"\d", s)]
+    return with_numbers[-1] if with_numbers else line
 
 
 def extract_answer(solution: str) -> tuple[str | None, str]:
@@ -64,7 +90,11 @@ def extract_answer(solution: str) -> tuple[str | None, str]:
     if FORMULA.search(line):
         return None, "formula"
 
-    numbers = [clean_number(n) for n in re.findall(NUMBER, line)]
+    sentence = final_sentence(line)
+    if NUMBER_WORD.search(sentence):
+        return None, "number_word"
+
+    numbers = [clean_number(n) for n in re.findall(NUMBER, sentence)]
     if not numbers:
         return None, "no_number"
 
@@ -87,6 +117,16 @@ def normalize_question(question: str) -> str:
     return re.sub(r"\s+", " ", question.lower()).strip()
 
 
+def calculation_steps(solution: str) -> int:
+    """Number of calculation steps in a worked solution, counted as '=' signs."""
+    return solution.count("=")
+
+
+def assign_levels(steps: pd.Series) -> pd.Series:
+    """Split problems into 3 equal-sized groups by number of steps: 1 = fewest, 3 = most."""
+    return pd.qcut(steps.rank(method="first"), 3, labels=[1, 2, 3]).astype(int)
+
+
 def report(step: str, df: pd.DataFrame, before: int) -> None:
     print(f"{step:<40} {len(df):>8,} rows  ({len(df) - before:+,})")
 
@@ -103,7 +143,10 @@ def main() -> None:
     df["drop_reason"] = extracted.str[1]
 
     # 2. Drop problems whose answer can't be checked, one rule at a time.
-    for reason in ["no_number", "undetermined", "approximate", "time_of_day", "ratio", "multiple_answers", "formula"]:
+    for reason in [
+        "no_number", "undetermined", "approximate", "time_of_day", "ratio",
+        "multiple_answers", "formula", "number_word",
+    ]:
         before = len(df)
         df = df[df["drop_reason"] != reason]
         report(f"Drop: {reason}", df, before)
@@ -113,8 +156,10 @@ def main() -> None:
     df = df[~df["question"].map(normalize_question).duplicated()]
     report("Drop: duplicate question", df, before)
 
-    # 4. Difficulty label. Left empty until the team decides how to measure difficulty.
-    df["level"] = pd.NA
+    # 4. Difficulty label: 3 equal-sized levels by number of calculation steps.
+    df["steps"] = df["solution"].map(calculation_steps)
+    df["level"] = assign_levels(df["steps"])
+    print(df.groupby("level")["steps"].agg(["count", "min", "max", "mean"]))
 
     # 5. Stable IDs from the original row number, so any row can be traced back.
     df["id"] = "orca_" + df["source_index"].astype(str).str.zfill(6)

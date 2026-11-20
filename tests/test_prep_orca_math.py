@@ -3,9 +3,10 @@
 The example lines are real final lines from Orca-Math solutions.
 """
 
+import pandas as pd
 import pytest
 
-from src.prep_orca_math import extract_answer, normalize_question
+from src.prep_orca_math import assign_levels, calculation_steps, extract_answer, normalize_question
 
 
 @pytest.mark.parametrize(
@@ -21,6 +22,13 @@ from src.prep_orca_math import extract_answer, normalize_question
         ("Each worker gets 3/8 of the pie.", "3/8"),
         ("The 24-hour store sold 90 items.", "90"),
         ("Thus, 2 moles of NH3 will react with 2 moles of HNO3 to produce 2 moles of NH4NO3.", "2"),
+        (
+            "16 + 1 = 17 peaches.\nJake has 6 fewer peaches than this person, so Jake has 17 - 6 = 11 peaches. "
+            "However, you asked for the number of peaches the person has, not Jake. So the person has 17 peaches.",
+            "17",
+        ),
+        ("The final bill is $33.17. That is what she paid.", "33.17"),
+        ("So, B's share of the profit is Rs. 108.", "108"),
     ],
 )
 def test_extracts_final_number(solution, expected):
@@ -39,6 +47,13 @@ def test_extracts_final_number(solution, expected):
         ("The train leaves at 7:45.", "time_of_day"),
         ("The salaries of A, B, and C are $3789.47, $1263.16, and $947.37, respectively.", "multiple_answers"),
         ("The total number of games is (n-1) * n / 2.", "formula"),
+        ("Therefore, the area of the rhombus is 200√3 square centimeters.", "formula"),
+        ("So, the annual interest rate of the second account is 10% (or 0.1 in decimal form).", "multiple_answers"),
+        (
+            "So, the quarterback should throw the ball at least twice to increase the probability "
+            "of getting a completed pass at least once to 51%.",
+            "number_word",
+        ),
     ],
 )
 def test_drops_ungradable_answers(solution, reason):
@@ -52,3 +67,19 @@ def test_uses_only_the_last_line():
 
 def test_normalize_question_ignores_case_and_spacing():
     assert normalize_question("  How many   Apples?\n") == normalize_question("how many apples?")
+
+
+@pytest.mark.parametrize(
+    "solution, expected",
+    [
+        ("10 + 5 = 15\nThe answer is 15.", 1),
+        ("a = 2\nb = 3\nc = 5", 3),
+        ("The answer is 15.", 0),
+    ],
+)
+def test_calculation_steps(solution, expected):
+    assert calculation_steps(solution) == expected
+
+
+def test_assign_levels_makes_equal_thirds():
+    assert assign_levels(pd.Series([1, 2, 3, 4, 5, 6])).tolist() == [1, 1, 2, 2, 3, 3]
