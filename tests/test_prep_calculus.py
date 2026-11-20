@@ -13,11 +13,6 @@ def test_derivative_question():
 def test_limit_question():
     assert build_question("Limits", "x^{2}") == "Evaluate the limit: $x^{2}$"
 
-
-def test_integral_question():  # delete if you drop Integrals
-    assert build_question("Integrals", "x^{2}") == "Find the indefinite integral of $x^{2}$ with respect to x."
-
-
 def test_parseable():
     assert is_parseable("\\frac{1}{x}") is True
 

@@ -19,12 +19,10 @@ from sympy.parsing.latex import parse_latex
 
 TEMPLATES = {
     "Derivatives": "Find the derivative of ${expr}$ with respect to x.",
-    "Limits": "Evaluate the limit: ${expr}$",
-    "Integrals": "Find the indefinite integral of ${expr}$ with respect to x.",
+    "Limits": "Evaluate the limit: ${expr}$"
 }
 
-# Placeholder until "Required change 3" is posted by the reviewer.
-TOPICS_TO_KEEP = ["Derivatives", "Limits", "Integrals"]
+TOPICS_TO_KEEP = ["Derivatives", "Limits"]
 
 _previous_rows = {"n": None}
 
@@ -90,9 +88,6 @@ def main():
     df = df[(df["q"].str.strip() != "") & (df["a"].str.strip() != "")]
     report("Drop missing/empty", df)
 
-    df = df[df["type"].isin(TOPICS_TO_KEEP)]
-    report("Keep chosen topics", df)
-
     df = df[~df["a"].str.contains(r"\langle", regex=False)]
     report("Drop interval answers", df)
 
@@ -106,6 +101,12 @@ def main():
     df["body"] = df["q"].map(limit_body)
     df = df[df["body"].map(is_parseable)]
     report("Drop unparseable expressions", df)
+
+    print("\nRows per topic before choosing topics:")
+    print(df["type"].value_counts())
+
+    df = df[df["type"].isin(TOPICS_TO_KEEP)]
+    report("Keep chosen topics", df)
 
     df = df.copy()
     df["size"] = df["body"].map(expression_size)
