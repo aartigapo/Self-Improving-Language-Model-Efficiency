@@ -1,0 +1,12 @@
+# Kaggle GPU environment, tested 2026-11-20 on a Tesla T4 (Python 3.13).
+#
+# Kaggle already has these installed; don't reinstall them:
+#   torch 2.11.0, transformers 5.20.2
+#
+# Before installing, remove Kaggle's old torchao (it breaks PEFT):
+#   pip uninstall -y torchao
+#
+# Then install these exact versions:
+trl==1.18.2
+peft==0.21.2
+wandb==0.28.1
